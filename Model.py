@@ -1,3 +1,5 @@
+import logging
+import math
 import os
 import traceback
 
@@ -8,7 +10,7 @@ import time
 
 import matplotlib.pyplot as plt
 from tensorflow.python.keras import Input
-from tensorflow.python.keras.applications import InceptionResNetV2
+from tensorflow.python.keras.applications import InceptionResNetV2, ResNet50
 from tensorflow.python.keras.engine.training import Model
 from tensorflow.python.keras.layers import GlobalAveragePooling2D, Dense, GlobalAveragePooling3D, AveragePooling2D, \
     Flatten
@@ -16,19 +18,27 @@ from tensorflow.python.keras.layers.normalization_v2 import BatchNormalization
 from tensorflow.python.tools.inspect_checkpoint import print_tensors_in_checkpoint_file
 
 
+import Utils
+
 BATCH_SIZE = 16
 RESNET_SIZE = 224
 USE_6POSE = False
 USE_ADAM_OPT = False
 
 
+log = logging.getLogger('DataSources')
+log.setLevel(logging.DEBUG)
+
+
 def load_image(image: str, bbox: np.array=None):
     image_array = cv2.imread(image)  # BGR
     image_array = cv2.cvtColor(image_array, cv2.COLOR_BGR2RGB)
     if bbox is not None:
-        x, y, w, h = bbox
-        x, y, w, h = int(x*.9), int(y*.9), int(w*1.1), int(h*1.1)
-        image_array = image_array[y: y + h, x: x + w]
+        try:
+            image_array = Utils.pre_process_image2(image_array, bbox)
+        except:
+            log.exception('failed to pre process image %s with bbox %s' % (image, bbox))
+            raise Exception('failed to pre process image %s with bbox %s' % (image, bbox))
     image_array = cv2.resize(image_array, (RESNET_SIZE, RESNET_SIZE), interpolation=cv2.INTER_CUBIC)
     image_array = np.asarray(image_array)
     return image_array
@@ -59,7 +69,7 @@ class DataGenerator(tf.keras.utils.Sequence):
             bbox = self.b_boxes[index] if self.b_boxes is not None and len(self.b_boxes) > 0 else None
             image_array = load_image(self.images[index], bbox)
             images.append(image_array)
-            label = self.labels[index] if USE_6POSE else self.labels[index][:3]
+            label = self.labels[index] if USE_6POSE is True else self.labels[index][:3]
             label = np.array(label, dtype=np.float32)
             labels.append(label)
 
@@ -101,41 +111,8 @@ class PredictDataGenerator(tf.keras.utils.Sequence):
 
 def custom_acc(y_true, y_pred):
     mean_theta = custom_loss(y_true, y_pred)
-    correct_prediction = tf.constant(100., tf.float32) - (mean_theta * 180 / np.pi) / 1.8
+    correct_prediction = tf.constant(180., tf.float32) - (mean_theta * 180. / np.pi)
     return correct_prediction
-
-
-def rodrigues_batch(rvecs):
-    """
-    Convert a batch of axis-angle rotations in rotation vector form shaped
-    (batch, 3) to a batch of rotation matrices shaped (batch, 3, 3).
-    See
-    https://en.wikipedia.org/wiki/Rodrigues%27_rotation_formula#Matrix_notation
-    https://en.wikipedia.org/wiki/Rotation_matrix#Rotation_matrix_from_axis_and_angle
-    """
-    batch_size = tf.shape(rvecs)[0]
-    # tf.assert_equal(tf.shape(rvecs)[1], 3)
-
-    thetas = tf.norm(rvecs, axis=1, keepdims=True)
-    is_zero = tf.equal(tf.squeeze(thetas), 0.0)
-    u = rvecs / thetas
-
-    # Each K is the cross product matrix of unit axis vectors
-    # pyformat: disable
-    zero = tf.zeros([batch_size])  # for broadcasting
-    Ks_1 = tf.stack([  zero   , -u[:, 2],  u[:, 1] ], axis=1)  # row 1
-    Ks_2 = tf.stack([  u[:, 2],  zero   , -u[:, 0] ], axis=1)  # row 2
-    Ks_3 = tf.stack([ -u[:, 1],  u[:, 0],  zero    ], axis=1)  # row 3
-    # pyformat: enable
-    Ks = tf.stack([Ks_1, Ks_2, Ks_3], axis=1)                  # stack rows
-
-    Rs = tf.eye(3, batch_shape=[batch_size]) + \
-         tf.sin(thetas)[..., tf.newaxis] * Ks + \
-         (1 - tf.cos(thetas)[..., tf.newaxis]) * tf.matmul(Ks, Ks)
-
-    # Avoid returning NaNs where division by zero happened
-    return tf.where(is_zero,
-                    tf.eye(3, batch_shape=[batch_size]), Rs)
 
 
 def custom_loss(y_true, y_pred):
@@ -145,13 +122,13 @@ def custom_loss(y_true, y_pred):
         rot_vec_l = y_true[i][:3]
         rot_vec_p = y_pred[i][:3]
 
-        R_l = rodrigues_batch(tf.reshape(rot_vec_l, [-1, 3]))
+        R_l = Utils.rodrigues_batch(tf.reshape(rot_vec_l, [-1, 3]))
         R_l = tf.reshape(R_l, (3, 3))
-        R_p = rodrigues_batch(tf.reshape(rot_vec_p, [-1, 3]))
+        R_p = Utils.rodrigues_batch(tf.reshape(rot_vec_p, [-1, 3]))
         R_p = tf.reshape(R_p, (3, 3))
 
         # calc angle between rotation matrix
-        theta_error = tf.math.acos((tf.trace(tf.matmul(tf.transpose(R_p), R_l)) - 1) / 2)
+        theta_error = tf.math.acos((tf.linalg.trace(tf.matmul(tf.transpose(R_p), R_l)) - 1) / 2)
 
         theta_error = tf.math.abs(theta_error)
         theta_errors.append(theta_error)
@@ -165,20 +142,40 @@ def custom_loss_2(y_true, y_pred):
     angles_true = tf.slice(y_true, [0, 0], [BATCH_SIZE,3])
     angles_pred = tf.slice(y_pred, [0, 0], [BATCH_SIZE,3])
 
-    return tf.reduce_mean(tf.compat.v1.math.square(angles_true - angles_pred)) + \
-           0 #tf.compat.v1.math.reduce_euclidean_norm(y_true[3:] - y_pred[3:])
+    translations_true = tf.slice(y_true, [0, 3], [BATCH_SIZE,3])
+    translations_pred = tf.slice(y_pred, [0, 3], [BATCH_SIZE,3])
+
+    return tf.reduce_mean(tf.compat.v1.math.square(angles_true - angles_pred)) + tf.math.sqrt(tf.compat.v1.math.reduce_euclidean_norm(translations_true - translations_pred))
 
 
-def get_model(train=True):
+def custom_loss_3(y_true, y_pred):
 
-    input = Input(shape=(224, 224, 3))
-    base = tf.keras.applications.ResNet50(input_tensor=input, include_top=False, weights='imagenet')
-    # base = InceptionResNetV2(input_shape=(224, 224, 3),
+    rx_l = tf.slice(y_true, [0, 0], [BATCH_SIZE,1])
+    rx_p = tf.slice(y_pred, [0, 0], [BATCH_SIZE,1])
+
+    ry_l = tf.slice(y_true, [0, 1], [BATCH_SIZE,1])
+    ry_p = tf.slice(y_pred, [0, 1], [BATCH_SIZE,1])
+
+    rz_l = tf.slice(y_true, [0, 2], [BATCH_SIZE,1])
+    rz_p = tf.slice(y_pred, [0, 2], [BATCH_SIZE,1])
+
+    return tf.reduce_mean(tf.compat.v1.math.square(rx_l - rx_p)) * 0.5 + \
+           tf.reduce_mean(tf.compat.v1.math.square(ry_l - ry_p)) * 0.3 + \
+           tf.reduce_mean(tf.compat.v1.math.square(rz_l - rz_p)) * 0.2
+
+
+def get_model(train_mode=True):
+
+    input = Input(shape=(RESNET_SIZE, RESNET_SIZE, 3))
+    # base = ResNet50(input_tensor=input, include_top=False, weights='imagenet', pooling='max')
+    base = ResNet50(input_tensor=input, include_top=False, weights='imagenet')
+    # base = InceptionResNetV2(input_tensor=input,
     #                          include_top=False,
     #                          weights='imagenet')
 
-    for layer in base.layers:
-        layer.trainable = False
+    base.trainable = False
+    # for layer in base.layers:
+    #     layer.trainable = False
 
     x = Dense(1024, activation='relu', name='pose_dense_1')(base.output)
     x = Flatten(name='pose_flatten_2')(x)
@@ -187,20 +184,20 @@ def get_model(train=True):
     x = Dense(128, activation='relu', name='pose_dense_5')(x)
     x = Dense(64, activation='relu', name='pose_dense_6')(x)
 
-    if USE_6POSE:
-        out = Dense(6, activation='linear', name='pose_dense_ouptut')(x)
+    if USE_6POSE is True:
+        out = Dense(6, activation='softmax', name='pose_dense_ouptut')(x)
     else:
-        out = Dense(3, activation='linear', name='pose_dense_ouptut')(x)
+        out = Dense(3, activation='tanh', name='pose_dense_ouptut')(x)
 
     model = Model(inputs=base.inputs, outputs=out)
 
-    if USE_ADAM_OPT:
-        optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate=0.01)
+    if USE_ADAM_OPT is True:
+        optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate=0.001)
     else:
         optimizer = tf.compat.v1.train.MomentumOptimizer(learning_rate=0.001, momentum=0.9)
 
-    if train:
-        model.compile(optimizer, loss='mse', metrics=[custom_acc])  # mse -> mean sqare error | 'accuracy'
+    if train_mode:
+        model.compile(optimizer, loss=custom_loss_3, metrics=['accuracy'])  # mse -> mean sqare error | 'accuracy'
     else:
         model.compile(optimizer, loss='mse', metrics=['accuracy'])  # mse -> mean sqare error | 'accuracy'
 
@@ -220,6 +217,7 @@ def train(images, b_boxes, labels, images_v, b_boxes_v, labels_v, epochs=1, mode
 
     if model_input is not None:
         # Loads the weights
+        log.info('train loading weights')
         model.load_weights(model_input)
 
     if model_output is not None:
@@ -230,33 +228,45 @@ def train(images, b_boxes, labels, images_v, b_boxes_v, labels_v, epochs=1, mode
         callbacks.append(cp_callback)
 
     history = model.fit_generator(train_data_generator,
-                              epochs=epochs, verbose=1,
-                              validation_data=valid_data_generator,
-                              callbacks=callbacks
-                              )
+                                  epochs=epochs, verbose=1,
+                                  validation_data=valid_data_generator,
+                                  callbacks=callbacks
+                                  )
 
-    print('\nhistory dict:', history.history)
+    eval_data_generator = DataGenerator(images[:500], labels[:500], b_boxes[:500], BATCH_SIZE)
+    eval = model.evaluate_generator(eval_data_generator)
+
+    log.info('train eval: %s' % eval)
+
+    log.info('\nhistory dict:', history.history)
 
     bbox = b_boxes[0] if b_boxes is not None and len(b_boxes) > 0 else None
     image_array = load_image(images[0], bbox)
 
     prediction = model.predict(np.array([image_array]))
-    print(prediction)
-    print(labels[0][:3])
+    log.info(prediction)
+    log.info(labels[0][:3])
 
     R_p, _ = cv2.Rodrigues(prediction[0])
     R_l, _ = cv2.Rodrigues(labels[0][:3])
     theta = np.arccos((np.trace(R_p.T @ R_l) - 1) / 2)
-    print(np.rad2deg(theta) / 180)
+    log.info(np.rad2deg(theta))
 
 
-def predict(images, b_boxes, model_input):
-    model = get_model(train=False)
-    model.load_weights(model_input)
+def predict(images, b_boxes, labels, model_input):
+    model = get_model(train_mode=False)
 
-    train_data_generator = DataGenerator(images[:1], [[0.110099974, 0.238761767, -0.443073971 ,40.78644871 ,34.50543871 ,1035.096866]], b_boxes[:1], 1)
-    model.fit_generator(train_data_generator)
+    if model_input is not None:
+        model.load_weights(model_input)
+
+    # train_data_generator = DataGenerator(images[:1], [[0.110099974, 0.238761767, -0.443073971 ,40.78644871 ,34.50543871 ,1035.096866]], b_boxes[:1], 1)
+    # model.fit_generator(train_data_generator)
 
     prediction_data_generator = PredictDataGenerator(images, b_boxes, BATCH_SIZE)
+    data_generator = DataGenerator(images, labels, b_boxes, BATCH_SIZE)
     predictions = model.predict_generator(prediction_data_generator, verbose=1)
+
+    eval_loss = model.evaluate_generator(data_generator)
+    log.info('predict eval loss: %s' % eval_loss)
+
     return predictions
