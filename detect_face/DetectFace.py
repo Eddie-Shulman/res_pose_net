@@ -6,6 +6,7 @@ import cv2
 import numpy as np
 import matplotlib.pyplot as plt
 
+from Utils import Data
 
 log = logging.getLogger('DataSources')
 
@@ -107,28 +108,34 @@ def detect_face_multithread(images, fn=detect_face_dlib, threads=5):
     return b_boxes
 
 
-def get_face_bb_multithread(landmarks_2d, threads=5):
-    log.info('get_face_bb_multithread::started:: %s images' % (len(landmarks_2d)))
+def get_face_bb_multithread(data: [Data], threads=5) -> [Data]:
+    log.info('get_face_bb_multithread::started:: %s images' % (len(data)))
     batch_size = 50
     p = Pool(processes=threads)
-    b_boxes = []
-    for i in range(int(np.floor(len(landmarks_2d) / batch_size))):
-        log.info('get_face_bb_multithread:: %s/%s' % (i*batch_size, len(landmarks_2d)))
-        b_boxes += p.map(get_face_bb, landmarks_2d[i * batch_size: (i+1) * batch_size])
+    data_with_bbox: [Data] = []
+    for i in range(int(np.floor(len(data) / batch_size))):
+        log.info('get_face_bb_multithread:: %s/%s' % (i*batch_size, len(data)))
+        data_with_bbox += p.map(get_face_bb, data[i * batch_size: (i+1) * batch_size])
 
-    if len(landmarks_2d) % batch_size > 0:
-        b_boxes += p.map(get_face_bb, landmarks_2d[int(np.floor(len(landmarks_2d) / batch_size) * batch_size):])
+    if len(data) % batch_size > 0:
+        data_with_bbox += p.map(get_face_bb, data[int(np.floor(len(data) / batch_size) * batch_size):])
 
     p.close()
     p.join()
 
-    return b_boxes
+    return data_with_bbox
 
 
-def get_face_bb(landmarks_2d):
-    bounding_rect = cv2.boundingRect(landmarks_2d.astype(np.int))
+def get_face_bboxes(data: [Data]) -> [Data]:
+    data = [get_face_bb(data_elm) for data_elm in data]
+    return data
+
+
+def get_face_bb(data: Data) -> Data:
+    bounding_rect = cv2.boundingRect(data.landmarks_2d.astype(np.int))
     x, y, w, h = bounding_rect
-    return np.array([x-2, y-2, w+2, h+2])
+    data.bbox = np.array([x-1, y-1, w+1, h+1])
+    return data
 
 
 if __name__ == '__main__':

@@ -164,6 +164,16 @@ def rodrigues_batch(rvecs):
                     tf.eye(3, batch_shape=[batch_size]), Rs)
 
 
+class Data(object):
+
+    def __init__(self, image: str, landmarks_2d: np.array, pose: np.array) -> None:
+        super().__init__()
+        self.image = image
+        self.landmarks_2d = landmarks_2d
+        self.pose = pose
+        self.bbox = None
+
+
 if __name__ == '__main__':
     image_ = cv2.imread('../augmented/300w_3d_helen_naive_1/118737215_1_2_aug.jpg')
     image_ = cv2.cvtColor(image_, cv2.COLOR_BGR2RGB)
