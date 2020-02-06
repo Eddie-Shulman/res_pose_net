@@ -97,7 +97,7 @@ def image_resize(image, width = None, height = None, inter = cv2.INTER_AREA):
 
 def pre_process_image2(image, bbox, allow_upscale=True, max_width=224):
     x, y, w, h = bbox
-    x, y, w, h = int(x - 1.), int(y - 1.), int(w + 1.), int(h + 1.)
+    x, y, w, h = max(int(x - 1.), 0), max(int(y - 1.), 0), int(w + 1.), int(h + 1.)
     image = image[y: y + h, x: x + w]
 
     # in case bbox larger the image need to adjust

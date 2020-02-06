@@ -66,10 +66,10 @@ class DataGenerator(tf.keras.utils.Sequence):
         images = []
         labels = []
         for i in range(index, index + self.batch_size):
-            bbox = self.b_boxes[index] if self.b_boxes is not None and len(self.b_boxes) > 0 else None
-            image_array = load_image(self.images[index], bbox)
+            bbox = self.b_boxes[i] if self.b_boxes is not None and len(self.b_boxes) > 0 else None
+            image_array = load_image(self.images[i], bbox)
             images.append(image_array)
-            label = self.labels[index] if USE_6POSE is True else self.labels[index][:3]
+            label = self.labels[i] if USE_6POSE is True else self.labels[i][:3]
             label = np.array(label, dtype=np.float32)
             labels.append(label)
 
@@ -99,8 +99,8 @@ class PredictDataGenerator(tf.keras.utils.Sequence):
     def __getitem__(self, index):
         images = []
         for i in range(index, index + self.batch_size):
-            bbox = self.b_boxes[index] if self.b_boxes is not None and len(self.b_boxes) > 0 else None
-            image_array = load_image(self.images[index], bbox)
+            bbox = self.b_boxes[i] if self.b_boxes is not None and len(self.b_boxes) > 0 else None
+            image_array = load_image(self.images[i], bbox)
             images.append(image_array)
 
         return np.array(images)
