@@ -18,21 +18,19 @@ log = logging.getLogger('DataSources')
 log.setLevel(logging.DEBUG)
 
 
-def naive_augment_300w_3d_helen():
+def get_face_model():
     model_3d = '../datasets/model3D_aug_-00_00_01.mat'
-    output_folder = '../augmented/300w_3d_helen_naive_v2'
-
     face_model = FaceModel(model_3d, 'model3D', False)
-    limit = -1 if not DEBUG else 5
-    data: [Data] = DataSources._load_data(DataSources.DataSources._300W_3D_HELEN,
-                                                                   DataSources._300w_3d_parser, limit=limit)
+    return face_model
 
+def gen_naive_augmentations(data: [Data], output_folder):
+    face_model = get_face_model()
     # save augmentation poses for training
     for i, data_elm in enumerate(data):
         if DEBUG and i > 5:
             break
 
-        log.info('augment_validation_set:: image: %s | %s/%s' % (data_elm.image, i, len(data)))
+        log.info('augment_validation_set:: image: %s | aug_group: %s | %s/%s' % (data_elm.image, i % 4, i, len(data)))
 
         if DEBUG:
             show_landmarks_on_image(data_elm)
@@ -40,11 +38,42 @@ def naive_augment_300w_3d_helen():
         generate_naive_augmentations(i, data_elm, output_folder, face_model)
 
 
+def naive_augment_300w_3d_helen():
+    output_folder = '../augmented/300w_3d_helen_naive_v2'
+
+    limit = -1 if not DEBUG else 5
+
+    data: [Data] = DataSources._load_data(DataSources.DataSources._300W_3D_HELEN,
+                                                                   DataSources._300w_3d_parser, limit=limit)
+
+    gen_naive_augmentations(data, output_folder)
+
+
+def naive_augment_300w_3d_lfpw():
+    output_folder = '../augmented/300w_3d_lfpw_naive'
+
+    limit = -1 if not DEBUG else 5
+
+    data: [Data] = DataSources._load_data(DataSources.DataSources._300W_3D_LFPW,
+                                                                   DataSources._300w_3d_parser, limit=limit)
+
+    gen_naive_augmentations(data, output_folder)
+
+
+def naive_augment_aflw2000():
+    output_folder = '../augmented/AFLW2000'
+
+    limit = -1 if not DEBUG else 5
+
+    data: [Data] = DataSources._load_data(DataSources.DataSources.AFLW2000,
+                                                                   DataSources._300w_3d_parser, limit=limit, landmarks_fld_name='pt3d_68')
+
+    gen_naive_augmentations(data, output_folder)
+
+
 def generate_naive_augmentations(img_index, data: Data, output_folder, face_model):
     x, y, w, h = DetectFace.get_face_bb2(data.landmarks_2d)
     face_center = (x + w)/2, (y + h)/2
-
-    filename = os.path.basename(data.image)
 
     orig_img = cv2.imread(data.image, 1)
 
@@ -92,8 +121,8 @@ def generate_naive_augmentations(img_index, data: Data, output_folder, face_mode
                     cx, cy = np.array(transformed_landmark_2d, dtype=np.int)[0]
                     cv2.circle(transformed_image, (cx, cy), 2, (0, 255, 0), 2)
 
-            transformation_data.append(['%s_%s_aug%s' % (filename_, i, file_extension_), transformed_pose, transformed_landmarks_2d])
-            cv2.imwrite('%s/%s' % (output_folder, '%s--__%s_%s_aug%s' % (filename_, i, j, file_extension_)), transformed_image)
+            transformation_data.append(['%s--%s_%s_aug%s' % (filename_, i, j, file_extension_), transformed_pose, transformed_landmarks_2d])
+            cv2.imwrite('%s/%s' % (output_folder, '%s--%s_%s_aug%s' % (filename_, i, j, file_extension_)), transformed_image)
 
     with open('%s/%s' % (output_folder, '%s.meta' % filename_), 'w') as f:
         for transformation_data_ in transformation_data:
@@ -274,4 +303,6 @@ if __name__ =='__main__':
     # augment_300w_lp_helen()
     # augment_validation_set()
     # naive_augment_validation_set()
-    naive_augment_300w_3d_helen()
+    # naive_augment_300w_3d_helen()
+    # naive_augment_300w_3d_lfpw()
+    naive_augment_aflw2000()

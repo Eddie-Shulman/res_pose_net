@@ -16,12 +16,19 @@ log = logging.getLogger('DataSources')
 
 class DataSources(Enum):
 
-    _300W_3D_HELEN = ('../datasets/300W-3D/HELEN', 'jpg')
+    _300W_3D_HELEN  = ('../datasets/300W-3D/HELEN', 'jpg')
+    _300W_3D_LFPW   = ('../datasets/300W-3D/LFPW', 'jpg')
+    AFLW2000        = ('../datasets/AFLW2000', 'jpg')
+
+    _300W_3D_HELEN_V2   = ('../augmented/300w_3d_helen_naive_v2', 'jpg')
+    _300W_3D_HELEN_NG   = ('../augmented/300w_3d_lfpw_naive', 'jpg')
+    AFLW2000_NG         = ('../augmented/AFLW2000', 'jpg')
 
     _300W_3D_HELEN_NG1 = ('../augmented/300w_3d_helen_naive_1', 'jpg')
     _300W_3D_HELEN_NG2 = ('../augmented/300w_3d_helen_naive_2', 'jpg')
     _300W_3D_HELEN_NG3 = ('../augmented/300w_3d_helen_naive_3', 'jpg')
     _300W_3D_HELEN_NG4 = ('../augmented/300w_3d_helen_naive_4', 'jpg')
+
 
     VALIDATION_1 = ('../datasets/openu_valid_set1', 'png')
     VALIDATION_2 = ('../datasets/openu_valid_set2', 'png')
@@ -65,19 +72,26 @@ def load_validation_set(data_source: DataSources=DataSources.VALIDATION_1) -> [D
     return data
 
 
-def load_validation_dataset2(data_source: DataSources=DataSources.VALIDATION_2) -> [Data]:
+def load_validation_dataset2(data_source: DataSources=DataSources.VALIDATION_2, recalc_pose=True) -> [Data]:
     root_folder, image_type = data_source.value
 
     log.info('load_validation_data2::%s:: started' % data_source.name)
     data = []
+
+    from GenerateTrainingSet import get_face_model, calc_projection, estimate_pose_from_landmarks
+    face_model = get_face_model()
 
     with open('%s/valid_set2.csv' % root_folder, newline='') as csv_file:
         validation_csv = csv.reader(csv_file, delimiter=',', quotechar='|')
         for row in validation_csv:
             if row[0]:
                 image = row[1]
-                pose = np.array(row[2:8], dtype=np.float32)
                 landmarks = np.array([np.array(re.sub('[\[\]]', '', re.sub('[ ]+', ' ', landmark)).strip().split(' '), dtype=np.float32) for landmark in row[8:]])
+                if recalc_pose:
+                    proj_mat_t_land = calc_projection(landmarks, face_model.model_TD, face_model)
+                    pose = estimate_pose_from_landmarks(proj_mat_t_land, face_model)
+                else:
+                    pose = np.array(row[2:8], dtype=np.float32)
                 data.append(Data('%s/%s' % (root_folder, image), landmarks, pose))
 
     return data
@@ -100,8 +114,8 @@ def load_naive_augmented_dataset(data_source: DataSources, limit=-1) -> [Data]:
 
                 if name not in  meta_data:
 
-                    meta_file_name = name.replace('_aug.%s' % image_type, '').split('_')
-                    meta_file_name = '%s_%s.meta' % (meta_file_name[0], meta_file_name[1])
+                    meta_file_name = name.split('--')
+                    meta_file_name = '%s.meta' % meta_file_name[0]
 
                     with open('%s/%s' % (root_folder, meta_file_name)) as f:
                         meta_lines = f.readlines()
@@ -119,18 +133,18 @@ def load_naive_augmented_dataset(data_source: DataSources, limit=-1) -> [Data]:
     return data
 
 
-def _300w_3d_parser(name: str, root_folder:str, image_type: str) -> Data:
+def _300w_3d_parser(name: str, root_folder:str, image_type: str, landmarks_fld_name='pt2d') -> Data:
 
     image = '%s/%s' % (root_folder, name)
     meta = loadmat('%s/%s' % (root_folder, name.replace('.%s' % image_type, '.mat')))
     rx, ry, rz, tx, ty, tz, scale = meta["Pose_Para"].reshape([-1]).astype(np.float32)
     pose = np.array([rx, ry, rz, tx, ty, tz, scale])
 
-    landmarks_2d = (meta["pt2d"]).astype(np.float32).transpose()
+    landmarks_2d = (meta[landmarks_fld_name]).astype(np.float32).transpose()
     return Data(image, landmarks_2d, pose)
 
 
-def _load_data(data_source: DataSources, parser_fn, limit=-1, threads=5) -> [Data]:
+def _load_data(data_source: DataSources, parser_fn, limit=-1, threads=5, landmarks_fld_name='pt2d') -> [Data]:
     root_folder, image_type = data_source.value
 
     log.info('data_sources::%s:: started' % data_source.name)
@@ -149,10 +163,10 @@ def _load_data(data_source: DataSources, parser_fn, limit=-1, threads=5) -> [Dat
     data: [Data] = []
     for i in range(int(np.floor(len(filenames) / batch_size))):
         log.info('data_sources::%s:: %s/%s' % (data_source.name, i*batch_size, len(filenames)))
-        data += p.map(partial(parser_fn, root_folder=root_folder, image_type=image_type), filenames[i * batch_size: (i + 1) * batch_size])
+        data += p.map(partial(parser_fn, root_folder=root_folder, image_type=image_type, landmarks_fld_name=landmarks_fld_name), filenames[i * batch_size: (i + 1) * batch_size])
 
     if len(filenames) % batch_size > 0:
-        data += p.map(partial(parser_fn, root_folder=root_folder, image_type=image_type), filenames[int(np.floor(len(filenames) / batch_size) * batch_size):])
+        data += p.map(partial(parser_fn, root_folder=root_folder, image_type=image_type, landmarks_fld_name=landmarks_fld_name), filenames[int(np.floor(len(filenames) / batch_size) * batch_size):])
 
     p.close()
     p.join()

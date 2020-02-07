@@ -169,6 +169,8 @@ class Data(object):
     def __init__(self, image: str, landmarks_2d: np.array, pose: np.array) -> None:
         super().__init__()
         self.image = image
+        if landmarks_2d.shape[1] > 2:
+            landmarks_2d = landmarks_2d[:, :2]
         self.landmarks_2d = landmarks_2d
         self.pose = pose
         self.bbox = None
