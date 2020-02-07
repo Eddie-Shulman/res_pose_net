@@ -6,8 +6,8 @@ import cv2
 import os
 import numpy as np
 import matplotlib.pyplot as plt
-import predict_pose.face_specific_augm.ThreeD_Model as ThreeD_Model
-import predict_pose.face_specific_augm.camera_calibration as calib
+import lib.face_specific_augm.ThreeD_Model as ThreeD_Model
+import lib.face_specific_augm.camera_calibration as calib
 
 ## Index to remap landmarks in case we flip an image
 repLand = [ 17,16,15,14,13,12,11,10, 9,8,7,6,5,4,3,2,1,27,26,25, \

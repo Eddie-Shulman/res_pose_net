@@ -132,10 +132,14 @@ def get_face_bboxes(data: [Data]) -> [Data]:
 
 
 def get_face_bb(data: Data) -> Data:
-    bounding_rect = cv2.boundingRect(data.landmarks_2d.astype(np.int))
-    x, y, w, h = bounding_rect
-    data.bbox = np.array([x-1, y-1, w+1, h+1])
+    data.bbox = get_face_bb2(data.landmarks_2d)
     return data
+
+
+def get_face_bb2(landmarks_2d) -> np.array:
+    bounding_rect = cv2.boundingRect(landmarks_2d.astype(np.int))
+    x, y, w, h = bounding_rect
+    return np.array([x, y, w, h])
 
 
 if __name__ == '__main__':

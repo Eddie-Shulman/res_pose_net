@@ -26,6 +26,44 @@ class DataSources(Enum):
     VALIDATION_1 = ('../datasets/openu_valid_set1', 'png')
     VALIDATION_2 = ('../datasets/openu_valid_set2', 'png')
 
+    TEST_SET = ('../datasets/openu_test_set', 'png')
+
+
+def load_test_set(data_source: DataSources=DataSources.TEST_SET) -> [Data]:
+    root_folder, image_type = data_source.value
+
+    data: [Data] = []
+    for root, dirs, files in os.walk("%s" % root_folder, topdown=False):
+        for name in files:
+            if name.endswith('.%s' % image_type):
+                data.append(Data('%s/%s' % (root_folder, name), None, None))
+
+    return data
+
+
+def load_validation_set(data_source: DataSources=DataSources.VALIDATION_1) -> [Data]:
+    root_folder, image_type = data_source.value
+
+    data: [Data] = []
+    with open('./%s/validation_set.csv' % root_folder, newline='') as csv_file:
+        validation_csv = csv.reader(csv_file, delimiter=',', quotechar='|')
+        for row in validation_csv:
+            if row[0]:
+                image = row[1]
+                rx, ry, rz, tx, ty, tz = np.array(row[2:8]).astype(np.float)
+                scale = tz
+                image_ = './%s/images/%s' % (root_folder, image)
+                pose = np.array([scale, rx, ry, rz, tx, ty])
+
+                with open('./%s/images/%s' % (root_folder, image.replace('.png', '.pts'))) as pts_file:
+                    rows = [rows.strip() for rows in pts_file]
+                rows = rows[rows.index('{') + 1: rows.index('}')]
+                landmarks_2d = np.array([row.split(' ') for row in rows]).astype(np.float)
+
+                data.append(Data(image_, landmarks_2d, pose))
+
+    return data
+
 
 def load_validation_dataset2(data_source: DataSources=DataSources.VALIDATION_2) -> [Data]:
     root_folder, image_type = data_source.value
