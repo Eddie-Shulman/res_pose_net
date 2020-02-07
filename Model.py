@@ -13,17 +13,20 @@ from tensorflow.python.keras import Input
 from tensorflow.python.keras.applications import InceptionResNetV2, ResNet50
 from tensorflow.python.keras.engine.training import Model
 from tensorflow.python.keras.layers import GlobalAveragePooling2D, Dense, GlobalAveragePooling3D, AveragePooling2D, \
-    Flatten
+    Flatten, Dropout, Activation, GlobalMaxPooling2D
 from tensorflow.python.keras.layers.normalization_v2 import BatchNormalization
+from tensorflow.python.keras.optimizers import Adam
 from tensorflow.python.tools.inspect_checkpoint import print_tensors_in_checkpoint_file
 
 
 import Utils
+from Utils import Data
 
-BATCH_SIZE = 16
+
+BATCH_SIZE = 32
 RESNET_SIZE = 224
 USE_6POSE = False
-USE_ADAM_OPT = False
+USE_ADAM_OPT = True
 
 
 log = logging.getLogger('DataSources')
@@ -46,15 +49,13 @@ def load_image(image: str, bbox: np.array=None):
 
 class DataGenerator(tf.keras.utils.Sequence):
 
-    def __init__(self, images, labels, b_boxes, batch_size, shuffle=False) -> None:
+    def __init__(self, data: [Utils.Data], batch_size, shuffle=False) -> None:
         super().__init__()
-        self.images = images
-        self.labels = labels
-        self.b_boxes = b_boxes
+        self.data = data
         self.batch_size = batch_size
         self.shuffle = shuffle
 
-        seq_len = int(np.floor(len(self.images) / self.batch_size))
+        seq_len = int(np.floor(len(self.data) / self.batch_size))
 
         self.indexes = np.arange(start=0, stop=seq_len, step=1, dtype=np.uint16) * self.batch_size
         # initial data shuffle
@@ -63,20 +64,20 @@ class DataGenerator(tf.keras.utils.Sequence):
     def __getitem__(self, idx):
         index = self.indexes[idx]
 
-        images = []
-        labels = []
-        for i in range(index, index + self.batch_size):
-            bbox = self.b_boxes[i] if self.b_boxes is not None and len(self.b_boxes) > 0 else None
-            image_array = load_image(self.images[i], bbox)
-            images.append(image_array)
-            label = self.labels[i] if USE_6POSE is True else self.labels[i][:3]
-            label = np.array(label, dtype=np.float32)
-            labels.append(label)
+        images, poses = [], []
 
-        return np.array(images), np.array(labels, dtype=np.float32)
+        for i in range(index, index + self.batch_size):
+            data = self.data[i]
+            bbox = data.bbox
+            image_array = load_image(data.image, bbox)
+            images.append(image_array)
+            pose = data.pose if USE_6POSE is True else data.pose[:3]
+            poses.append(np.array(pose, dtype=np.float32))
+
+        return np.array(images), np.array(poses, dtype=np.float32)
 
     def __len__(self):
-        return int(np.floor(len(self.images) / self.batch_size))
+        return int(np.floor(len(self.data) / self.batch_size))
 
     def on_epoch_end(self):
         super().on_epoch_end()
@@ -86,31 +87,33 @@ class DataGenerator(tf.keras.utils.Sequence):
 
 class PredictDataGenerator(tf.keras.utils.Sequence):
 
-    def __init__(self, images, b_boxes, batch_size) -> None:
+    def __init__(self, data, batch_size) -> None:
         super().__init__()
-        self.images = images
-        self.b_boxes = b_boxes
+        self.data = data
         self.batch_size = batch_size
 
-        seq_len = int(np.floor(len(self.images) / self.batch_size))
+        seq_len = int(np.floor(len(self.data) / self.batch_size))
 
         self.indexes = np.arange(start=0, stop=seq_len, step=1, dtype=np.uint16) * self.batch_size
 
     def __getitem__(self, index):
         images = []
         for i in range(index, index + self.batch_size):
-            bbox = self.b_boxes[i] if self.b_boxes is not None and len(self.b_boxes) > 0 else None
-            image_array = load_image(self.images[i], bbox)
+            data = self.data[i]
+            bbox = data.bbox
+            image_array = load_image(data.image, bbox)
             images.append(image_array)
 
         return np.array(images)
 
     def __len__(self):
-        return int(np.floor(len(self.images) / self.batch_size))
+        return int(np.floor(len(self.data) / self.batch_size))
 
 
 def custom_acc(y_true, y_pred):
-    mean_theta = custom_loss(y_true, y_pred)
+    # mean_theta = tf.reduce_mean(tf.math.reduce_euclidean_norm(y_true - y_pred, 1))
+    mean_theta = custom_loss_3(y_true, y_pred)
+    # mean_theta = custom_loss(y_true, y_pred)
     correct_prediction = tf.constant(180., tf.float32) - (mean_theta * 180. / np.pi)
     return correct_prediction
 
@@ -159,15 +162,20 @@ def custom_loss_3(y_true, y_pred):
     rz_l = tf.slice(y_true, [0, 2], [BATCH_SIZE,1])
     rz_p = tf.slice(y_pred, [0, 2], [BATCH_SIZE,1])
 
-    return tf.reduce_mean(tf.compat.v1.math.square(rx_l - rx_p)) * 0.5 + \
-           tf.reduce_mean(tf.compat.v1.math.square(ry_l - ry_p)) * 0.3 + \
-           tf.reduce_mean(tf.compat.v1.math.square(rz_l - rz_p)) * 0.2
+    return tf.reduce_mean(tf.norm(y_true - y_pred))  # return euclidean
+
+    # return tf.reduce_mean(tf.nn.l2_loss(y_true-y_pred))  # same as norm but without the sqrt
+    # return tf.reduce_mean(tf.keras.layers.Lambda(lambda y_true, y_pred: tf.math.reduce_euclidean_norm(y_true - y_pred, 1)))
+
+    # return (tf.reduce_mean(tf.compat.v1.math.abs(rx_l - rx_p)) * 1. +
+    #        tf.reduce_mean(tf.compat.v1.math.abs(ry_l - ry_p)) * 1. +
+    #        tf.reduce_mean(tf.compat.v1.math.abs(rz_l - rz_p)) * 1.) / 3
 
 
 def get_model(train_mode=True):
 
     input = Input(shape=(RESNET_SIZE, RESNET_SIZE, 3))
-    # base = ResNet50(input_tensor=input, include_top=False, weights='imagenet', pooling='max')
+    # base = ResNet50(input_tensor=input, include_top=False, weights='imagenet')
     base = ResNet50(input_tensor=input, include_top=False, weights='imagenet')
     # base = InceptionResNetV2(input_tensor=input,
     #                          include_top=False,
@@ -177,39 +185,48 @@ def get_model(train_mode=True):
     # for layer in base.layers:
     #     layer.trainable = False
 
-    x = Dense(1024, activation='relu', name='pose_dense_1')(base.output)
+    x = base.output
+
+    # op 2
+    # x = BatchNormalization(momentum=0.95, trainable=train_mode)(x)
+    # x = Activation('relu')(x)
+    # x = GlobalAveragePooling2D()(x)
+    # x = Dropout(0.5)(x)
+    # x = Dense(128, activation='relu', name='pose_dense_6', trainable=train_mode)(x)
+
+    # op 1
+    x = BatchNormalization(momentum=0.94, trainable=train_mode)(x)
+    x = Activation('relu')(x)
+    x = Dropout(0.5)(x)
+    x = Dense(512, activation='relu', name='pose_dense_6', trainable=train_mode)(x)  # , kernel_regularizer='l2'
     x = Flatten(name='pose_flatten_2')(x)
-    x = Dense(512, activation='relu', name='pose_dense_3')(x)
-    x = Dense(256, activation='relu', name='pose_dense_4')(x)
-    x = Dense(128, activation='relu', name='pose_dense_5')(x)
-    x = Dense(64, activation='relu', name='pose_dense_6')(x)
 
     if USE_6POSE is True:
         out = Dense(6, activation='softmax', name='pose_dense_ouptut')(x)
     else:
-        out = Dense(3, activation='tanh', name='pose_dense_ouptut')(x)
+        out = Dense(3, activation=None, name='pose_dense_ouptut', trainable=train_mode)(x)
 
     model = Model(inputs=base.inputs, outputs=out)
 
     if USE_ADAM_OPT is True:
-        optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate=0.001)
+        optimizer =  tf.compat.v1.train.AdamOptimizer(learning_rate=0.0005) #  Adam(lr=0.05) tf.compat.v1.train.AdamOptimizer(learning_rate=0.05)
     else:
         optimizer = tf.compat.v1.train.MomentumOptimizer(learning_rate=0.001, momentum=0.9)
 
     if train_mode:
-        model.compile(optimizer, loss=custom_loss_3, metrics=['accuracy'])  # mse -> mean sqare error | 'accuracy'
+        model.compile(optimizer, loss='mse', metrics=['accuracy', custom_acc])  # mse -> mean sqare error | 'accuracy'
     else:
-        model.compile(optimizer, loss='mse', metrics=['accuracy'])  # mse -> mean sqare error | 'accuracy'
+        model.compile(optimizer, loss='mae', metrics=['accuracy', custom_acc])  # mse -> mean sqare error | 'accuracy' | mae -> mean absolute error
 
     model.summary()
 
     return model
 
 
-def train(images, b_boxes, labels, images_v, b_boxes_v, labels_v, epochs=1, model_input=None, model_output=None):
+def train(data: [Data], data_v: [Data], epochs=1, model_input=None, model_output=None):
 
-    train_data_generator = DataGenerator(images, labels, b_boxes, BATCH_SIZE, shuffle=True)
-    valid_data_generator = DataGenerator(images_v, labels_v, b_boxes_v, BATCH_SIZE)
+    train_data_generator = DataGenerator(data, BATCH_SIZE, shuffle=True)
+    valid_data_generator = DataGenerator(data_v, BATCH_SIZE)
 
     model = get_model()
 
@@ -233,27 +250,27 @@ def train(images, b_boxes, labels, images_v, b_boxes_v, labels_v, epochs=1, mode
                                   callbacks=callbacks
                                   )
 
-    eval_data_generator = DataGenerator(images[:500], labels[:500], b_boxes[:500], BATCH_SIZE)
+    eval_data_generator = DataGenerator(data[:500], BATCH_SIZE)
     eval = model.evaluate_generator(eval_data_generator)
 
     log.info('train eval: %s' % eval)
 
     log.info('\nhistory dict:', history.history)
 
-    bbox = b_boxes[0] if b_boxes is not None and len(b_boxes) > 0 else None
-    image_array = load_image(images[0], bbox)
+    bbox = data[0].bbox
+    image_array = load_image(data[0].image, bbox)
 
     prediction = model.predict(np.array([image_array]))
     log.info(prediction)
-    log.info(labels[0][:3])
+    log.info(data[0].pose[:3])
 
     R_p, _ = cv2.Rodrigues(prediction[0])
-    R_l, _ = cv2.Rodrigues(labels[0][:3])
+    R_l, _ = cv2.Rodrigues(data[0].pose[:3])
     theta = np.arccos((np.trace(R_p.T @ R_l) - 1) / 2)
     log.info(np.rad2deg(theta))
 
 
-def predict(images, b_boxes, labels, model_input):
+def predict(data, model_input):
     model = get_model(train_mode=False)
 
     if model_input is not None:
@@ -262,8 +279,8 @@ def predict(images, b_boxes, labels, model_input):
     # train_data_generator = DataGenerator(images[:1], [[0.110099974, 0.238761767, -0.443073971 ,40.78644871 ,34.50543871 ,1035.096866]], b_boxes[:1], 1)
     # model.fit_generator(train_data_generator)
 
-    prediction_data_generator = PredictDataGenerator(images, b_boxes, BATCH_SIZE)
-    data_generator = DataGenerator(images, labels, b_boxes, BATCH_SIZE)
+    prediction_data_generator = PredictDataGenerator(data, BATCH_SIZE)
+    data_generator = DataGenerator(data, BATCH_SIZE)
     predictions = model.predict_generator(prediction_data_generator, verbose=1)
 
     eval_loss = model.evaluate_generator(data_generator)

@@ -6,40 +6,38 @@ import DataSources
 import Model
 from detect_face import DetectFace
 import Utils
+from Utils import Data
 
 log = logging.getLogger('DataSources')
 log.setLevel(logging.DEBUG)
 
 
-def train_300w_3d_helen_naive_augmentations(data_sources: [DataSources.DataSources],
-                                            model_input, model_output,
-                                            fast_face_detect=True, limit=-1):
-    log.info('train_300w_3d_helen_naive_augmentations::')
-    images_v, validation_pose_v, landmarks_2d_v = DataSources.load_validation_dataset2()
-
-    images, validation_pose, landmarks_2d = [], [], []
-    for data_source in data_sources:
-        images_, validation_pose_, landmarks_2d_ = DataSources.load_naive_augmented_dataset(data_source, limit=limit)
-        images += images_
-        validation_pose += validation_pose_
-        landmarks_2d += landmarks_2d_
-
-    if limit > -1:
-        images, validation_pose, landmarks_2d = images[:limit], validation_pose[:limit], landmarks_2d[:limit]
+def run_train(data: [Data], data_v: [Data], fast_face_detect=True, epochs=15, model_input=None, model_output=None):
 
     log.info('train_300w_3d_helen_naive_augmentations:: start face bbox detections')
     if fast_face_detect:
-        b_boxes = DetectFace.get_face_bb_multithread(landmarks_2d)
-        b_boxes_v = DetectFace.get_face_bb_multithread(landmarks_2d_v)
+        data: [Data] = DetectFace.get_face_bb_multithread(data)
+        data2 = DetectFace.get_face_bboxes(data)
+
+        for i, data_elm in enumerate(data):
+            x1, y1, w1, h1 = data_elm.bbox
+            x2, y2, w2, h2 = data2[i].bbox
+
+            if x1 != x2 or y1 != y2 or w1 != w2 or h1 != h2:
+                log.error('INVALID BBOXES !!!')
+                raise Exception('INVALID BBOXES !!!')
+
+        data_v = DetectFace.get_face_bb_multithread(data_v)
     else:
-        b_boxes = DetectFace.detect_face_multithread(images)
-        b_boxes_v = DetectFace.detect_face_multithread(images_v)
+        # TODO: refactor code to use data obj
+        b_boxes = DetectFace.detect_face_multithread(data)
+        b_boxes_v = DetectFace.detect_face_multithread(data_v)
 
-    none_indices = [i for i, x in enumerate(b_boxes) if x is None]
-
-    images = [image for i, image in enumerate(images) if i not in none_indices]
-    validation_pose = [validation_pose_ for i, validation_pose_ in enumerate(validation_pose) if i not in none_indices]
-    b_boxes = [b_box for i, b_box in enumerate(b_boxes) if i not in none_indices]
+    # none_indices = [i for i, x in enumerate(b_boxes) if x is None]
+    #
+    # images = [image for i, image in enumerate(images) if i not in none_indices]
+    # validation_pose = [validation_pose_ for i, validation_pose_ in enumerate(validation_pose) if i not in none_indices]
+    # b_boxes = [b_box for i, b_box in enumerate(b_boxes) if i not in none_indices]
 
     # for i, image in enumerate(images):
     #     log.info(image)
@@ -57,21 +55,48 @@ def train_300w_3d_helen_naive_augmentations(data_sources: [DataSources.DataSourc
     #     image = cv2.resize(image, (224, 224), interpolation=cv2.INTER_CUBIC)
     #     Utils.matplot_image(image)
 
-    Model.train(images, b_boxes, validation_pose, images_v, b_boxes_v, validation_pose_v ,
-                epochs=15,
-                model_input=model_input,
-                model_output=model_output)
+    Model.train(data, data_v , epochs=epochs, model_input=model_input, model_output=model_output)
+
+
+def train_300w_3d_helen_naive_augmentations(data_sources: [DataSources.DataSources],
+                                            model_input, model_output,
+                                            limit=-1):
+    log.info('train_300w_3d_helen_naive_augmentations::')
+    data_v: [Data] = DataSources.load_validation_dataset2(recalc_pose=True)
+
+    data: [Data] = []
+
+    for data_source in data_sources:
+        data += DataSources.load_naive_augmented_dataset(data_source, limit=limit)
+
+    if limit > -1:
+        data = data[:limit]
+
+    run_train(data, data_v, model_input=model_input, model_output=model_output, epochs=15)
+
+
+def train_validation_set_2(model_input=None, model_output=None):
+
+    data = DataSources.load_validation_dataset2()
+
+    data = data[:] * 2
+    run_train(data, data[:100], model_input=model_input, model_output=model_output, epochs=15)
 
 
 if __name__ == '__main__':
-    # train_300w_3d_helen_naive_augmentations([DataSources.DataSources._300W_3D_HELEN_NG1],
-    #                                         model_input=None,
-    #                                         model_output='models/transfer_3params/cp_300w_3d_helen_naive_1.ckpt',
-    #                                         limit=-1)
-    train_300w_3d_helen_naive_augmentations([DataSources.DataSources._300W_3D_HELEN_NG1, DataSources.DataSources._300W_3D_HELEN_NG2, DataSources.DataSources._300W_3D_HELEN_NG3, DataSources.DataSources._300W_3D_HELEN_NG4],
+    # train_validation_set_2()
+
+    train_300w_3d_helen_naive_augmentations([DataSources.DataSources._300W_3D_HELEN_V2,
+                                             DataSources.DataSources._300W_3D_HELEN_NG,
+                                             DataSources.DataSources.AFLW2000_NG],
                                             model_input=None,
-                                            model_output='models/transfer_3params/cp_300w_3d_helen_naive.ckpt',
+                                            model_output='models/transfer_3params/cp_300w_3d_helen_naive_1.ckpt',
                                             limit=-1)
+    # train_300w_3d_helen_naive_augmentations([DataSources.DataSources._300W_3D_HELEN_NG1, DataSources.DataSources._300W_3D_HELEN_NG2,
+    #                                          DataSources.DataSources._300W_3D_HELEN_NG3, DataSources.DataSources._300W_3D_HELEN_NG4],
+    #                                         model_input=None,
+    #                                         model_output='models/transfer_3params/cp_300w_3d_helen_naive.ckpt',
+    #                                         limit=-1)
     # train_300w_3d_helen_naive_augmentations(DataSources.DataSources._300W_3D_HELEN_NG2,
     #                                         model_input='models/transfer_3params/cp_300w_3d_helen_naive_1.ckpt',
     #                                         model_output='models/transfer_3params/cp_300w_3d_helen_naive_2.ckpt',
