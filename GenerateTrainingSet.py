@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 
 import DataSources
+import Utils
 from Utils import Data
 from detect_face import DetectFace
 from lib.face_specific_augm import myutil, config, renderer
@@ -23,17 +24,20 @@ def get_face_model():
     face_model = FaceModel(model_3d, 'model3D', False)
     return face_model
 
+
 def gen_naive_augmentations(data: [Data], output_folder):
+
+    if DEBUG:
+        output_folder += '_debug'
+
     face_model = get_face_model()
     # save augmentation poses for training
     for i, data_elm in enumerate(data):
-        if DEBUG and i > 5:
-            break
 
         log.info('augment_validation_set:: image: %s | aug_group: %s | %s/%s' % (data_elm.image, i % 4, i, len(data)))
 
-        if DEBUG:
-            show_landmarks_on_image(data_elm)
+        # if DEBUG:
+        #     show_landmarks_on_image(data_elm)
 
         generate_naive_augmentations(i, data_elm, output_folder, face_model)
 
@@ -41,7 +45,7 @@ def gen_naive_augmentations(data: [Data], output_folder):
 def naive_augment_300w_3d_helen():
     output_folder = '../augmented/300w_3d_helen_naive_v2'
 
-    limit = -1 if not DEBUG else 5
+    limit = -1  # if not DEBUG else 5
 
     data: [Data] = DataSources._load_data(DataSources.DataSources._300W_3D_HELEN,
                                                                    DataSources._300w_3d_parser, limit=limit)
@@ -52,7 +56,7 @@ def naive_augment_300w_3d_helen():
 def naive_augment_300w_3d_lfpw():
     output_folder = '../augmented/300w_3d_lfpw_naive'
 
-    limit = -1 if not DEBUG else 5
+    limit = -1 # if not DEBUG else 5
 
     data: [Data] = DataSources._load_data(DataSources.DataSources._300W_3D_LFPW,
                                                                    DataSources._300w_3d_parser, limit=limit)
@@ -67,6 +71,14 @@ def naive_augment_aflw2000():
 
     data: [Data] = DataSources._load_data(DataSources.DataSources.AFLW2000,
                                                                    DataSources._300w_3d_parser, limit=limit, landmarks_fld_name='pt3d_68')
+
+    gen_naive_augmentations(data, output_folder)
+
+
+def naive_augment_validation_set2():
+    output_folder = '../augmented/validation_set2'
+
+    data: [Data] = DataSources.load_validation_dataset2()
 
     gen_naive_augmentations(data, output_folder)
 
@@ -92,6 +104,14 @@ def generate_naive_augmentations(img_index, data: Data, output_folder, face_mode
 
         if DEBUG:
             log.info('generate_naive_augmentations:: image: %s | trans index: %s/%s' % (data.image, i, len(augmentation_transformations)))
+
+            rot_mat_orig, _ = cv2.Rodrigues(data.pose[:3])
+            rotation_vecs, translation_vecs = solve_pnp(data.landmarks_2d, face_model.model_TD, face_model)
+            rot_mat_land, _ = cv2.Rodrigues(rotation_vecs)
+
+            theta = Utils.get_theta_between_rot_mats(rot_mat_orig, rot_mat_land)
+
+            log.info('theta between orig pos and land pose: %s' % theta)
 
         rotation_transformation, roll, flipped_rotation_transformation = augmentation_transformation
 
@@ -127,6 +147,7 @@ def generate_naive_augmentations(img_index, data: Data, output_folder, face_mode
     with open('%s/%s' % (output_folder, '%s.meta' % filename_), 'w') as f:
         for transformation_data_ in transformation_data:
             f.write('%s|%s|%s\n' % (transformation_data_[0], np.array2string(transformation_data_[1]), np.array2string(transformation_data_[2]).replace('\n', ' ')))
+            pass
 
 
 def estimate_pose_from_landmarks(proj_mat_landmarks_2d, face_model):
@@ -140,9 +161,7 @@ def estimate_pose_from_landmarks(proj_mat_landmarks_2d, face_model):
     return transformed_pose
 
 
-def calc_projection(landmarks_2d, landmarks_3d, face_model=None):
-    if face_model is None:
-        face_model = FaceModel('../datasets/model3D_aug_-00_00_01.mat', 'model3D', False)
+def solve_pnp(landmarks_2d, landmarks_3d, face_model):
 
     # in case there is a missing dimension
     if landmarks_3d.shape[1] == 2:
@@ -152,6 +171,15 @@ def calc_projection(landmarks_2d, landmarks_3d, face_model=None):
     landmarks_2d = np.reshape(landmarks_2d, [68, 2, 1])
 
     retval, rotation_vecs, translation_vecs = cv2.solvePnP(padded_landmarks, landmarks_2d, face_model.out_A, None)
+
+    return rotation_vecs, translation_vecs
+
+
+def calc_projection(landmarks_2d, landmarks_3d, face_model=None):
+    if face_model is None:
+        face_model = FaceModel('../datasets/model3D_aug_-00_00_01.mat', 'model3D', False)
+
+    rotation_vecs, translation_vecs = solve_pnp(landmarks_2d, landmarks_3d, face_model)
 
     rotation_mat, jacobian = cv2.Rodrigues(rotation_vecs, None)
 
@@ -282,27 +310,8 @@ def generate_naive_augmentation_transformations(augmentation_group_index, img_w,
     return augmentation_transformations
 
 
-def show_landmarks_on_image(data: Data):
-    tmp_image = cv2.imread(data.image)
-    tmp_image = cv2.cvtColor(tmp_image, cv2.COLOR_BGR2RGB)
-    for landmark_2d in data.landmarks_2d:
-        landmark_2d_ = landmark_2d.astype(np.int)
-        x, y = landmark_2d_
-        cv2.circle(tmp_image, (x, y), 2, (255, 0, 0), 2)
-
-    data = DetectFace.get_face_bb(data)
-    x, y, w, h = data.bbox
-    cv2.rectangle(tmp_image, (x, y), (x+w, y+h), (255, 0, 0), 2)
-
-    plt.figure()
-    plt.imshow(tmp_image, cmap='gray', interpolation='nearest')
-    plt.show()
-
-
 if __name__ =='__main__':
-    # augment_300w_lp_helen()
-    # augment_validation_set()
-    # naive_augment_validation_set()
+    # naive_augment_validation_set2()
     # naive_augment_300w_3d_helen()
     # naive_augment_300w_3d_lfpw()
     naive_augment_aflw2000()
