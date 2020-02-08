@@ -6,6 +6,7 @@ import cv2
 import tensorflow as tf
 
 
+
 def matplot_image(image: np.array):
     plt.figure()
     plt.imshow(image, interpolation='nearest')
@@ -164,6 +165,12 @@ def rodrigues_batch(rvecs):
                     tf.eye(3, batch_shape=[batch_size]), Rs)
 
 
+def get_theta_between_rot_mats(rot_mat1, rot_mat2):
+    theta = np.arccos((np.around(np.trace(rot_mat1.T @ rot_mat2), 3) - 1) / 2)
+    theta = np.rad2deg(np.abs(theta))
+    return theta
+
+
 class Data(object):
 
     def __init__(self, image: str, landmarks_2d: np.array, pose: np.array) -> None:
@@ -174,6 +181,33 @@ class Data(object):
         self.landmarks_2d = landmarks_2d
         self.pose = pose
         self.bbox = None
+
+
+def show_image(image):
+    plt.figure()
+    plt.imshow(image, cmap='gray', interpolation='nearest')
+    plt.show()
+
+
+def show_landmarks_on_image(data: Data):
+    from detect_face import DetectFace
+
+    tmp_image = cv2.imread(data.image)
+    tmp_image = cv2.cvtColor(tmp_image, cv2.COLOR_BGR2RGB)
+    for landmark_2d in data.landmarks_2d:
+        landmark_2d_ = landmark_2d.astype(np.int)
+        x, y = landmark_2d_
+        cv2.circle(tmp_image, (x, y), 2, (255, 0, 0), 2)
+
+    data = DetectFace.get_face_bb(data)
+    x, y, w, h = data.bbox
+    cv2.rectangle(tmp_image, (x, y), (x+w, y+h), (255, 0, 0), 2)
+
+    plt.figure()
+    plt.imshow(tmp_image, cmap='gray', interpolation='nearest')
+    plt.show()
+
+
 
 
 if __name__ == '__main__':
