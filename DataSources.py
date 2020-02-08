@@ -8,7 +8,7 @@ from functools import partial
 from multiprocessing.pool import Pool
 import numpy as np
 from scipy.io import loadmat
-
+from scipy.spatial.transform import Rotation as R
 from Utils import Data
 
 log = logging.getLogger('DataSources')
@@ -21,14 +21,14 @@ class DataSources(Enum):
     AFLW2000        = ('../datasets/AFLW2000', 'jpg')
 
     _300W_3D_HELEN_V2   = ('../augmented/300w_3d_helen_naive_v2', 'jpg')
-    _300W_3D_HELEN_NG   = ('../augmented/300w_3d_lfpw_naive', 'jpg')
+    _300W_3D_LFPW_NG    = ('../augmented/300w_3d_lfpw_naive', 'jpg')
     AFLW2000_NG         = ('../augmented/AFLW2000', 'jpg')
+    VALIDATION_SET2_NG  = ('../augmented/validation_set2', 'png')
 
     _300W_3D_HELEN_NG1 = ('../augmented/300w_3d_helen_naive_1', 'jpg')
     _300W_3D_HELEN_NG2 = ('../augmented/300w_3d_helen_naive_2', 'jpg')
     _300W_3D_HELEN_NG3 = ('../augmented/300w_3d_helen_naive_3', 'jpg')
     _300W_3D_HELEN_NG4 = ('../augmented/300w_3d_helen_naive_4', 'jpg')
-
 
     VALIDATION_1 = ('../datasets/openu_valid_set1', 'png')
     VALIDATION_2 = ('../datasets/openu_valid_set2', 'png')
@@ -134,10 +134,14 @@ def load_naive_augmented_dataset(data_source: DataSources, limit=-1) -> [Data]:
 
 
 def _300w_3d_parser(name: str, root_folder:str, image_type: str, landmarks_fld_name='pt2d') -> Data:
-
     image = '%s/%s' % (root_folder, name)
     meta = loadmat('%s/%s' % (root_folder, name.replace('.%s' % image_type, '.mat')))
-    rx, ry, rz, tx, ty, tz, scale = meta["Pose_Para"].reshape([-1]).astype(np.float32)
+    rx, ry, rz, tx, ty, tz, scale = meta["Pose_Para"].reshape([-1]).astype(np.float32)  # pitch yaw roll
+
+    # convert to rotvec
+    r = R.from_euler('zxy', [rx, ry, rz], degrees=False)
+    rx, ry, rz = r.as_rotvec()
+
     pose = np.array([rx, ry, rz, tx, ty, tz, scale])
 
     landmarks_2d = (meta[landmarks_fld_name]).astype(np.float32).transpose()
