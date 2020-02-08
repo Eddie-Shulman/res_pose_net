@@ -1,6 +1,8 @@
+import csv
 import logging
 
 import DataSources
+import Utils
 from Utils import Data
 from detect_face import DetectFace
 import Model
@@ -33,8 +35,7 @@ def validate_predictions(predicted_poses, data: [Data], is_6pos=False):
         rot_mat_label, _ = cv2.Rodrigues(np.array([rx_v, ry_v, rz_v]))
         rot_mat_pred, _ = cv2.Rodrigues(np.array([rx_p, ry_p, rz_p]))
 
-        theta = np.arccos((np.trace(rot_mat_pred.T @ rot_mat_label) - 1) / 2)
-        theta = np.rad2deg(np.abs(theta))
+        theta = Utils.get_theta_between_rot_mats(rot_mat_pred, rot_mat_label)
         theta_error += theta
 
         # log.info('v_pose: %s\t\t%s\t\t%s' % (rx_v, ry_v, rz_v))
@@ -57,6 +58,8 @@ def predict(data: [Data], model_input=None, limit=-1, is_6pos=False):
     avg_theta_error = validate_predictions(predicted_poses, data, is_6pos)
     log.info('AVG error: %s' % avg_theta_error)
 
+    export_results(predicted_poses, data)
+
 
 def run_validation_set2(model_input=None, limit=-1, is_6pos=False):
     log.info('run_validation_set2::')
@@ -70,9 +73,25 @@ def test_300w_3d_helen1(model_input=None, limit=-1, is_6pos=False):
     predict(data, model_input, limit, is_6pos)
 
 
+def run_test_set(model_input=None, limit=-1, is_6pos=False):
+    log.info('run_validation_set2::')
+    data: [Data] = DataSources.load_test_set()
+    predict(data, model_input, limit, is_6pos)
+
+
+def export_results(predicted_poses, data):
+    with open('results.csv', 'w') as f:
+        writer = csv.DictWriter(f, fieldnames=['file name', 'rx', 'ry', 'rz'])
+        writer.writeheader()
+        for i, data_ in enumerate(data):
+            rx, ry, rz = predicted_poses[i]
+            writer.writerow({'file name' : data_.image, 'rx': rx, 'ry': ry, 'rz': rz})
+
+
 if __name__ == '__main__':
     # run_validation_set2(None)
-    run_validation_set2(model_input='models/transfer_3params/cp_300w_3d_helen_naive_1.ckpt')
+    run_validation_set2(model_input='models/validation_set2/cp_validation_set2_naive.ckpt')
     # test_300w_3d_helen1(model_input='models/transfer_6params/cp_300w_3d_helen_naive_1.ckpt', limit=16, is_6pos=True)
     # test_300w_3d_helen1(model_input='models/transfer_3params/cp_300w_3d_helen_naive_1.ckpt', limit=150)
     # test_300w_3d_helen1(None, limit=500)
+    run_test_set(model_input='models/transfer_3params/custom2_full_ds.ckpt')
