@@ -8,6 +8,8 @@ from detect_face import DetectFace
 import Utils
 from Utils import Data
 
+import numpy as np
+
 log = logging.getLogger('DataSources')
 log.setLevel(logging.DEBUG)
 
@@ -70,27 +72,31 @@ def train_300w_3d_helen_naive_augmentations(data_sources: [DataSources.DataSourc
         data += DataSources.load_naive_augmented_dataset(data_source, limit=limit)
 
     if limit > -1:
+        np.random.shuffle(data)
         data = data[:limit]
 
-    run_train(data, data_v, model_input=model_input, model_output=model_output, epochs=15)
+    run_train(data, data_v, model_input=model_input, model_output=model_output, epochs=50)
 
 
 def train_validation_set_2(model_input=None, model_output=None):
 
-    data = DataSources.load_validation_dataset2()
+    data_v = DataSources.load_validation_dataset2()
+    data = DataSources.load_naive_augmented_dataset(DataSources.DataSources.VALIDATION_SET2_NG)
 
-    data = data[:] * 2
-    run_train(data, data[:100], model_input=model_input, model_output=model_output, epochs=15)
+    # data = data[:]
+    run_train(data, data_v, model_input=model_input, model_output=model_output, epochs=50)
 
 
 if __name__ == '__main__':
-    # train_validation_set_2()
+    # train_validation_set_2(model_output='models/validation_set2/cp_validation_set2_naive.ckpt')
 
     train_300w_3d_helen_naive_augmentations([DataSources.DataSources._300W_3D_HELEN_V2,
-                                             DataSources.DataSources._300W_3D_HELEN_NG,
-                                             DataSources.DataSources.AFLW2000_NG],
+                                             DataSources.DataSources._300W_3D_LFPW_NG,
+                                             DataSources.DataSources.AFLW2000_NG,
+                                             DataSources.DataSources.VALIDATION_SET2_NG
+                                             ],
                                             model_input=None,
-                                            model_output='models/transfer_3params/cp_300w_3d_helen_naive_1.ckpt',
+                                            model_output='models/transfer_3params/custom2_full_ds.ckpt',
                                             limit=-1)
     # train_300w_3d_helen_naive_augmentations([DataSources.DataSources._300W_3D_HELEN_NG1, DataSources.DataSources._300W_3D_HELEN_NG2,
     #                                          DataSources.DataSources._300W_3D_HELEN_NG3, DataSources.DataSources._300W_3D_HELEN_NG4],
