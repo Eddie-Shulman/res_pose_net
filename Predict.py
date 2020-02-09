@@ -111,8 +111,8 @@ def run_test_set(model_input=None, limit=-1, is_6pos=False, model_name='c2_net')
     face_model = GenerateTrainingSet.get_face_model()
     for data_ in data:
         try:
-            proj_mat = GenerateTrainingSet.calc_projection(data_.landmarks_2d, face_model.model_TD, face_model)
-            pose = GenerateTrainingSet.estimate_pose_from_landmarks(proj_mat, face_model)
+            rotation_vecs, translation_vecs = GenerateTrainingSet.solve_pnp(data_.landmarks_2d, face_model.model_TD, face_model)
+            pose = np.concatenate((rotation_vecs.flatten(), translation_vecs.flatten()))
             data_.pose = pose
         except:
             log.warning('failed to get pose for image %s' % data_.image)
@@ -123,7 +123,7 @@ def run_test_set(model_input=None, limit=-1, is_6pos=False, model_name='c2_net')
 
 
 def export_results(predicted_poses, data):
-    with open('results.csv', 'w') as f:
+    with open('results.csv', 'w', newline='') as f:
         writer = csv.DictWriter(f, fieldnames=['file name', 'rx', 'ry', 'rz'])
         writer.writeheader()
         for i, predicted_pose in enumerate(predicted_poses):
@@ -138,7 +138,7 @@ if __name__ == '__main__':
     # test_300w_3d_helen1(model_input='models/transfer_6params/cp_300w_3d_helen_naive_1.ckpt', limit=16, is_6pos=True)
     # test_300w_3d_helen1(model_input='models/transfer_3params/cp_300w_3d_helen_naive_1.ckpt', limit=150)
     # test_300w_3d_helen1(None, limit=500)
-    run_test_set(model_input='models/transfer_3params/custom2_full_ds.ckpt', model_name='c2_net')
+    # run_test_set(model_input='models/transfer_3params/custom2_full_ds_d2.ckpt', model_name='c2_net')
     # run_test_set(model_input='models/transfer_3params/custom2_full_ds_b2.ckpt', model_name='c2_net')
-    # run_test_set(model_input='models/transfer_3params/c_resnet_full_ds.ckpt', model_name='c_resnet')
+    run_test_set(model_input='models/transfer_3params/c_resnet_full_ds.ckpt', model_name='c_resnet')
     # run_test_set(model_input='models/transfer_3params/c_resnet_full_ds_b2.ckpt', model_name='c_resnet')

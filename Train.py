@@ -75,7 +75,7 @@ def train_300w_3d_helen_naive_augmentations(data_sources: [DataSources.DataSourc
         np.random.shuffle(data)
         data = data[:limit]
 
-    run_train(data, data_v, model_input=model_input, model_output=model_output, epochs=50)
+    run_train(data, data_v, model_input=model_input, model_output=model_output, epochs=30)
 
 
 def train_validation_set_2(model_input=None, model_output=None):
@@ -95,8 +95,8 @@ if __name__ == '__main__':
                                              DataSources.DataSources.AFLW2000_NG,
                                              DataSources.DataSources.VALIDATION_SET2_NG
                                              ],
-                                            model_input=None,
-                                            model_output='models/transfer_3params/custom2_full_ds.ckpt',
+                                            model_input='models/transfer_3params/c_resnet_full_ds.ckpt',
+                                            model_output='models/transfer_3params/c_resnet_full_ds_b2.ckpt',
                                             limit=-1)
     # train_300w_3d_helen_naive_augmentations([DataSources.DataSources._300W_3D_HELEN_NG1, DataSources.DataSources._300W_3D_HELEN_NG2,
     #                                          DataSources.DataSources._300W_3D_HELEN_NG3, DataSources.DataSources._300W_3D_HELEN_NG4],
