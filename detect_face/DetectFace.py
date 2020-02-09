@@ -12,6 +12,11 @@ log = logging.getLogger('DataSources')
 
 
 dlib_detector = dlib.get_frontal_face_detector()
+try:
+    predictor = dlib.shape_predictor('./detect_face/dlib_shape_predictor_68_face_landmarks.dat')
+
+except:
+    log.warning('Failed to load dlib face landmarks ds - landmark detections will not work!')
 
 DNN = "TF"
 if DNN == "CAFFE":
@@ -59,9 +64,8 @@ def detect_face_cv_dnn(image):
     return np.array([x, y, w, h])
 
 
-def detect_face_dlib(image):
-    # predictor = dlib.shape_predictor('./predict_pose/dlib_shape_predictor_68_face_landmarks.dat')
-    image_mat = dlib.load_rgb_image(image)
+def detect_face_dlib(data: Data) -> Data:
+    image_mat = dlib.load_rgb_image(data.image)
     faces, scores, idx = dlib_detector.run(image_mat, 1, -1)
     # log.info(faces)
 
@@ -84,28 +88,45 @@ def detect_face_dlib(image):
         w = faces[0].right() - x
         h = faces[0].bottom() - y
     else:
-        log.info('detect_face_dlib:: ERROR - failed to find face bbox for %s' % image)
-        return None
+        log.error('detect_face_dlib:: ERROR - failed to find face bbox for %s' % data.image)
+        return data
 
-    return np.array([x, y, w, h])
+    data.bbox = np.array([x, y, w, h])
+    return data
 
 
-def detect_face_multithread(images, fn=detect_face_dlib, threads=5):
-    log.info('detect_face_multithread::started::%s::%s images' % (fn.__name__, len(images)))
+def detect_face_landmarks_dlib(data: Data) -> Data:
+    try:
+        image = cv2.imread(data.image)
+        image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        x, y, w, h = data.bbox
+        dlib_rect = dlib.rectangle(x, y, x+ w, y + h)
+        landmarks = []
+        predicted_landmarks = predictor(image, dlib_rect)
+        for i in range(68):
+            landmarks.append(np.array([predicted_landmarks.part(i).x, predicted_landmarks.part(i).y], dtype=np.float32))
+        data.landmarks_2d = np.array(landmarks, dtype=np.float32)
+    except:
+        log.warning('did not find landmarks to image %s ' % data.image)
+    return data
+
+
+def detect_face_multithread(data: [Data], fn=detect_face_dlib, threads=5) -> [Data]:
+    log.info('detect_face_multithread::started::%s::%s images' % (fn.__name__, len(data)))
     batch_size = 50
     p = Pool(processes=threads)
-    b_boxes = []
-    for i in range(int(np.floor(len(images) / batch_size))):
-        log.info('detect_face_multithread:: %s/%s' % (i*batch_size, len(images)))
-        b_boxes += p.map(fn, images[i * batch_size: (i+1) * batch_size])
+    data_: [Data] = []
+    for i in range(int(np.floor(len(data) / batch_size))):
+        log.info('detect_face_multithread:: %s/%s' % (i*batch_size, len(data)))
+        data_ += p.map(fn, data[i * batch_size: (i + 1) * batch_size])
 
-    if len(images) % batch_size > 0:
-        b_boxes += p.map(fn, images[int(np.floor(len(images) / batch_size) * batch_size):])
+    if len(data) % batch_size > 0:
+        data_ += p.map(fn, data[int(np.floor(len(data) / batch_size) * batch_size):])
 
     p.close()
     p.join()
 
-    return b_boxes
+    return data_
 
 
 def get_face_bb_multithread(data: [Data], threads=5) -> [Data]:
