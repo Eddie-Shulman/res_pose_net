@@ -20,6 +20,7 @@ def validate_predictions(predicted_poses, data: [Data], is_6pos=False):
 
     theta_error = 0.
     all_deg_error = 0
+    total_samples_compared = 0
 
     for i, predicted_pose in enumerate(predicted_poses):
         if is_6pos:
@@ -27,7 +28,11 @@ def validate_predictions(predicted_poses, data: [Data], is_6pos=False):
         else:
             rx_p, ry_p, rz_p = predicted_pose
 
-        rx_v, ry_v, rz_v, tx_l, ty_l, tz_l = data[i].pose
+        if data[i].pose is not None:
+            rx_v, ry_v, rz_v, tx_l, ty_l, tz_l = data[i].pose
+        else:
+            log.warning('image %s doesnt have a pose! skipping...')
+            continue
 
         euc_distance = np.linalg.norm(np.array([rx_v, ry_v, rz_v]) - np.array([rx_p, ry_p, rz_p]))
         all_deg_error += euc_distance
@@ -42,56 +47,98 @@ def validate_predictions(predicted_poses, data: [Data], is_6pos=False):
         # log.info('p_pose: %s\t\t%s\t\t%s' % (rx_p, ry_p, rz_p))
         log.info('theta: %s | euc. d.: %s' % (theta, euc_distance))
 
-    log.info('all_deg_error:: %s' % (all_deg_error / len(predicted_poses)))
+        total_samples_compared += 1
 
-    return theta_error / len(predicted_poses)
+    log.info('all_deg_error:: %s' % (all_deg_error / total_samples_compared))
+
+    return theta_error / total_samples_compared
 
 
-def predict(data: [Data], model_input=None, limit=-1, is_6pos=False):
+def predict(data: [Data], model_input=None, limit=-1, is_6pos=False, model_name='c2_net'):
     if limit > -1:
         data = data[:limit]
 
-    data = DetectFace.get_face_bb_multithread(data)
+    if data[0].bbox is None:
+        data = DetectFace.get_face_bb_multithread(data)
 
-    predicted_poses = Model.predict(data, model_input=model_input)
+    orig_data_len = len(data)
+    # add extra pedding to match batches
+    if len(data) % Model.BATCH_SIZE != 0:
+        data += data[:(Model.BATCH_SIZE - len(data) % Model.BATCH_SIZE)]
+
+    predicted_poses = Model.predict(data, model_input=model_input, model_name=model_name)
+
+    predicted_poses = predicted_poses[:orig_data_len]
+    data = data[:orig_data_len]
 
     avg_theta_error = validate_predictions(predicted_poses, data, is_6pos)
     log.info('AVG error: %s' % avg_theta_error)
 
     export_results(predicted_poses, data)
 
+    return predicted_poses
 
-def run_validation_set2(model_input=None, limit=-1, is_6pos=False):
+
+def run_validation_set2(model_input=None, limit=-1, is_6pos=False, model_name='c2_net'):
     log.info('run_validation_set2::')
     data: [Data] = DataSources.load_validation_dataset2()
-    predict(data, model_input, limit, is_6pos)
+    predict(data, model_input, limit, is_6pos, model_name=model_name)
 
 
-def test_300w_3d_helen1(model_input=None, limit=-1, is_6pos=False):
+def test_300w_3d_helen1(model_input=None, limit=-1, is_6pos=False, model_name='c2_net'):
     log.info('run_validation_set2::')
     data: [Data] = DataSources.load_naive_augmented_dataset(DataSources.DataSources._300W_3D_HELEN_NG1, limit=limit)
-    predict(data, model_input, limit, is_6pos)
+    predict(data, model_input, limit, is_6pos, model_name=model_name)
 
 
-def run_test_set(model_input=None, limit=-1, is_6pos=False):
+def run_test_set(model_input=None, limit=-1, is_6pos=False, model_name='c2_net'):
+    import GenerateTrainingSet
     log.info('run_validation_set2::')
     data: [Data] = DataSources.load_test_set()
-    predict(data, model_input, limit, is_6pos)
+
+    # find bbox for each image
+    data = DetectFace.detect_face_multithread(data)
+
+    # find landmarks
+    data = DetectFace.detect_face_multithread(data, fn=DetectFace.detect_face_landmarks_dlib)
+
+    # updated bboxes according to landmarks if such were found
+    for data_ in data:
+        if data_.landmarks_2d is not None:
+            DetectFace.get_face_bb(data_)
+
+    # estimate pose based on the dlib landmarks and the face model
+    face_model = GenerateTrainingSet.get_face_model()
+    for data_ in data:
+        try:
+            proj_mat = GenerateTrainingSet.calc_projection(data_.landmarks_2d, face_model.model_TD, face_model)
+            pose = GenerateTrainingSet.estimate_pose_from_landmarks(proj_mat, face_model)
+            data_.pose = pose
+        except:
+            log.warning('failed to get pose for image %s' % data_.image)
+
+    predicted_poses = predict(data, model_input, limit, is_6pos, model_name=model_name)
+
+
 
 
 def export_results(predicted_poses, data):
     with open('results.csv', 'w') as f:
         writer = csv.DictWriter(f, fieldnames=['file name', 'rx', 'ry', 'rz'])
         writer.writeheader()
-        for i, data_ in enumerate(data):
-            rx, ry, rz = predicted_poses[i]
-            writer.writerow({'file name' : data_.image, 'rx': rx, 'ry': ry, 'rz': rz})
+        for i, predicted_pose in enumerate(predicted_poses):
+            rx, ry, rz = predicted_pose
+            writer.writerow({'file name' : data[i].image, 'rx': rx, 'ry': ry, 'rz': rz})
 
 
 if __name__ == '__main__':
     # run_validation_set2(None)
-    run_validation_set2(model_input='models/validation_set2/cp_validation_set2_naive.ckpt')
+    # run_validation_set2(model_input='models/transfer_3params/custom2_full_ds.ckpt', model_name='c2_net')
+    # run_validation_set2(model_input='models/transfer_3params/c_resnet_full_ds.ckpt', model_name='c_resnet')
     # test_300w_3d_helen1(model_input='models/transfer_6params/cp_300w_3d_helen_naive_1.ckpt', limit=16, is_6pos=True)
     # test_300w_3d_helen1(model_input='models/transfer_3params/cp_300w_3d_helen_naive_1.ckpt', limit=150)
     # test_300w_3d_helen1(None, limit=500)
-    run_test_set(model_input='models/transfer_3params/custom2_full_ds.ckpt')
+    run_test_set(model_input='models/transfer_3params/custom2_full_ds.ckpt', model_name='c2_net')
+    # run_test_set(model_input='models/transfer_3params/custom2_full_ds_b2.ckpt', model_name='c2_net')
+    # run_test_set(model_input='models/transfer_3params/c_resnet_full_ds.ckpt', model_name='c_resnet')
+    # run_test_set(model_input='models/transfer_3params/c_resnet_full_ds_b2.ckpt', model_name='c_resnet')

@@ -236,7 +236,9 @@ def get_custom_model2(input, train_mode=True):
 def get_resnet_transfer_model(input, train_mode=True, freeze_reznet=True):
     base = ResNet50(input_tensor=input, include_top=False, weights='imagenet')
 
-    if freeze_reznet:
+    if not train_mode:
+        base.trainable = False
+    elif freeze_reznet:
         for layer in base.layers:
             # freeze all but the last (5th) and half (inner) of the 4th layers
             if not (layer.name.startswith('bn5') or layer.name.startswith('res5') or
@@ -260,12 +262,15 @@ def get_resnet_transfer_model(input, train_mode=True, freeze_reznet=True):
     return x
 
 
-def get_model(train_mode=True):
+def get_model(model_name='c2_net', train_mode=True):
 
     input = Input(shape=(RESNET_SIZE, RESNET_SIZE, 3))
-    # x = get_custom_model(input, train_mode=train_mode)
-    x = get_custom_model2(input, train_mode=train_mode)
-    # x = get_resnet_transfer_model(input, train_mode=train_mode, freeze_reznet=True)
+    if model_name == 'c1_net':
+        x = get_custom_model(input, train_mode=train_mode)
+    elif model_name == 'c2_net':
+        x = get_custom_model2(input, train_mode=train_mode)
+    else:
+        x = get_resnet_transfer_model(input, train_mode=train_mode, freeze_reznet=True)
 
     if USE_6POSE is True:
         out = Dense(6, activation='softmax', name='pose_dense_ouptut', trainable=train_mode)(x)
@@ -275,7 +280,7 @@ def get_model(train_mode=True):
     model = Model(inputs=input, outputs=out)
 
     if USE_ADAM_OPT is True:
-        optimizer =  tf.compat.v1.train.AdamOptimizer(learning_rate=0.0005) #  Adam(lr=0.05) tf.compat.v1.train.AdamOptimizer(learning_rate=0.05)
+        optimizer =  tf.compat.v1.train.AdamOptimizer(learning_rate=0.0001) #  Adam(lr=0.05) tf.compat.v1.train.AdamOptimizer(learning_rate=0.05)
     else:
         optimizer = tf.compat.v1.train.MomentumOptimizer(learning_rate=0.001, momentum=0.3)
 
@@ -342,8 +347,8 @@ def train(data: [Data], data_v: [Data], epochs=1, model_input=None, model_output
     log.info(np.rad2deg(theta))
 
 
-def predict(data, model_input):
-    model = get_model(train_mode=False)
+def predict(data, model_input, model_name='c2_net'):
+    model = get_model(model_name=model_name, train_mode=False)
 
     if model_input is not None:
         model.load_weights(model_input)

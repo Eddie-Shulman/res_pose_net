@@ -176,7 +176,7 @@ class Data(object):
     def __init__(self, image: str, landmarks_2d: np.array, pose: np.array) -> None:
         super().__init__()
         self.image = image
-        if landmarks_2d.shape[1] > 2:
+        if landmarks_2d is not None and landmarks_2d.shape[1] > 2:
             landmarks_2d = landmarks_2d[:, :2]
         self.landmarks_2d = landmarks_2d
         self.pose = pose
@@ -199,7 +199,8 @@ def show_landmarks_on_image(data: Data):
         x, y = landmark_2d_
         cv2.circle(tmp_image, (x, y), 2, (255, 0, 0), 2)
 
-    data = DetectFace.get_face_bb(data)
+    if data.bbox is None:
+        data = DetectFace.get_face_bb(data)
     x, y, w, h = data.bbox
     cv2.rectangle(tmp_image, (x, y), (x+w, y+h), (255, 0, 0), 2)
 
