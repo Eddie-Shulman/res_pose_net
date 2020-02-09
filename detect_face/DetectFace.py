@@ -18,50 +18,50 @@ try:
 except:
     log.warning('Failed to load dlib face landmarks ds - landmark detections will not work!')
 
-DNN = "TF"
-if DNN == "CAFFE":
-    modelFile = "detect_face/res10_300x300_ssd_iter_140000_fp16.caffemodel"
-    configFile = "detect_face/deploy.prototxt"
-    cv_dnn_net = cv2.dnn.readNetFromCaffe(configFile, modelFile)
-else:
-    modelFile = "detect_face/opencv_face_detector_uint8.pb"
-    configFile = "detect_face/opencv_face_detector.pbtxt"
-    cv_dnn_net = cv2.dnn.readNetFromTensorflow(modelFile, configFile)
+# DNN = "TF"
+# if DNN == "CAFFE":
+#     modelFile = "detect_face/res10_300x300_ssd_iter_140000_fp16.caffemodel"
+#     configFile = "detect_face/deploy.prototxt"
+#     cv_dnn_net = cv2.dnn.readNetFromCaffe(configFile, modelFile)
+# else:
+#     modelFile = "detect_face/opencv_face_detector_uint8.pb"
+#     configFile = "detect_face/opencv_face_detector.pbtxt"
+#     cv_dnn_net = cv2.dnn.readNetFromTensorflow(modelFile, configFile)
 
 DEBUG = False
 
 
-def detect_face_cv_dnn(image):
-
-    image_mat = dlib.load_rgb_image(image)
-    frameHeight, frameWidth = image_mat.shape[0], image_mat.shape[1]
-
-    blob = cv2.dnn.blobFromImage(image_mat)
-
-    cv_dnn_net.setInput(blob)
-    detections = cv_dnn_net.forward()  # returns [1, 1, 200, 7] -> 200 detections, 3-6 -> bbox, 2 -> confidence
-
-    if len(detections[0][0]) == 0:
-        log.info('detect_face_cv_dnn:: ERROR - failed to find face bbox for %s' % image)
-        return None
-
-    confidence_scores = np.array(detections[0][0]).transpose()[2]
-    max_confidence_i = np.argmax(confidence_scores)
-
-    x, y = int(detections[0, 0, max_confidence_i, 3] * frameWidth * 0.95), int(detections[0, 0, max_confidence_i, 4] * frameHeight)
-    w, h = int(detections[0, 0, max_confidence_i, 5] * frameWidth * 0.95) - x, int(detections[0, 0, max_confidence_i, 6] * frameHeight * 1.02) - y
-
-    if DEBUG:
-        cv2.rectangle(image_mat, (x, y), (x + w, y + h), (0, 255, 0), 2)
-        plt.figure()
-        plt.imshow(image_mat, cmap='gray', interpolation='nearest')
-        plt.show()
-
-    if confidence_scores[max_confidence_i] < 0.51:
-        log.info('detect_face_cv_dnn:: ERROR - found face bbox for %s with very low confidence %s' % (image, confidence_scores[max_confidence_i]))
-        return None
-
-    return np.array([x, y, w, h])
+# def detect_face_cv_dnn(image):
+#
+#     image_mat = dlib.load_rgb_image(image)
+#     frameHeight, frameWidth = image_mat.shape[0], image_mat.shape[1]
+#
+#     blob = cv2.dnn.blobFromImage(image_mat)
+#
+#     cv_dnn_net.setInput(blob)
+#     detections = cv_dnn_net.forward()  # returns [1, 1, 200, 7] -> 200 detections, 3-6 -> bbox, 2 -> confidence
+#
+#     if len(detections[0][0]) == 0:
+#         log.info('detect_face_cv_dnn:: ERROR - failed to find face bbox for %s' % image)
+#         return None
+#
+#     confidence_scores = np.array(detections[0][0]).transpose()[2]
+#     max_confidence_i = np.argmax(confidence_scores)
+#
+#     x, y = int(detections[0, 0, max_confidence_i, 3] * frameWidth * 0.95), int(detections[0, 0, max_confidence_i, 4] * frameHeight)
+#     w, h = int(detections[0, 0, max_confidence_i, 5] * frameWidth * 0.95) - x, int(detections[0, 0, max_confidence_i, 6] * frameHeight * 1.02) - y
+#
+#     if DEBUG:
+#         cv2.rectangle(image_mat, (x, y), (x + w, y + h), (0, 255, 0), 2)
+#         plt.figure()
+#         plt.imshow(image_mat, cmap='gray', interpolation='nearest')
+#         plt.show()
+#
+#     if confidence_scores[max_confidence_i] < 0.51:
+#         log.info('detect_face_cv_dnn:: ERROR - found face bbox for %s with very low confidence %s' % (image, confidence_scores[max_confidence_i]))
+#         return None
+#
+#     return np.array([x, y, w, h])
 
 
 def detect_face_dlib(data: Data) -> Data:
@@ -170,4 +170,4 @@ if __name__ == '__main__':
     image = '../augmented/valid_set_naive/image_00232_13_aug.png'
     image = '../augmented/valid_set_naive/image_00121_41_aug.png'
     # log.info(detect_face_cv_dnn(image))
-    log.info(detect_face_multithread([image], fn=detect_face_cv_dnn))
+    # log.info(detect_face_multithread([image], fn=detect_face_cv_dnn))
