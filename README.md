@@ -1,4 +1,4 @@
-#Final Project - Intro To Computer Vision
+# Final Project - Intro To Computer Vision
 
 ## The problem - Face pose estimation
 The problem was to estimate 3D face pose, i.e. euler angles, using computer vision\ machine learning\ deep learning 
